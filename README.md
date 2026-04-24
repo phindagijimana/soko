@@ -70,6 +70,14 @@ npm run build
 npm run dev
 ```
 
+## GitHub Pages (frontend)
+
+The [Deploy GitHub Pages](.github/workflows/deploy-github-pages.yml) workflow runs on every push to `main`. The site is a **static build only**; the API must be hosted separately (e.g. cloud, VPS, or FastAPI on a public URL).
+
+1. **Repository** → **Settings** → **Pages** → set **Build and deployment** source to **GitHub Actions** (use the provided workflow, not a branch as the source for this setup).
+2. **Settings** → **Secrets and variables** → **Actions** → **Variables**: add `VITE_API_URL` to your public API base URL (no trailing slash), e.g. `https://api.yourdomain.com`. This value is embedded at build time. Optional: `VITE_BASE` if the app is not served at `https://<user>.github.io/<repo>/` (for example, a custom domain with a different path).
+3. For **production** API settings, set `ENVIRONMENT=production` and add your Pages origin to `ALLOWED_ORIGINS` (e.g. `https://phindagijimana.github.io` or `https://<user>.github.io`) so the browser can call the API from the deployed site.
+
 ## Tests run for this package
 ### Backend
 ```bash

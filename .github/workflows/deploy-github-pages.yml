@@ -1,0 +1,65 @@
+# Build the Vite app and deploy static assets to GitHub Pages.
+# Repo Settings → Pages → Build and deployment → Source: "GitHub Actions"
+#
+# Set a repository variable (Settings → Secrets and variables → Actions → Variables):
+#   VITE_API_URL — public base URL of your API (e.g. https://api.example.com) with no trailing slash
+#
+# In production, configure the API ALLOWED_ORIGINS to include your Pages origin, e.g.:
+#   https://<user>.github.io
+
+name: Deploy GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+        env:
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          CI: true
+          VITE_API_URL: ${{ vars.VITE_API_URL }}
+          VITE_BASE: ${{ vars.VITE_BASE }}
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
