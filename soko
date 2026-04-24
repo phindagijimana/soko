@@ -1,0 +1,353 @@
+#!/usr/bin/env bash
+# Soko — local dev orchestration (install / start / stop)
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND="$ROOT/backend"
+FRONTEND="$ROOT/frontend"
+STATE="$ROOT/.soko"
+BACKEND_PID="$STATE/backend.pid"
+FRONTEND_PID="$STATE/frontend.pid"
+BACKEND_LOG="$STATE/backend.log"
+FRONTEND_LOG="$STATE/frontend.log"
+FRONTEND_PORT_FILE="$STATE/frontend.port"
+BACKEND_PORT_FILE="$STATE/backend.port"
+FRONTEND_ENV_FILE="$FRONTEND/.env.development.local"
+NPM_REGISTRY="${SOKO_NPM_REGISTRY:-https://registry.npmjs.org/}"
+# API: prefer 2500; if busy, first free port in 2500-2550 (unless SOKO_BACKEND_PORT is set)
+BACKEND_RANGE_LO="${SOKO_BACKEND_PORT_RANGE_LO:-2500}"
+BACKEND_RANGE_HI="${SOKO_BACKEND_PORT_RANGE_HI:-2550}"
+# Frontend: prefer 2000; if busy, first free port in 2000-2050 (unless SOKO_FRONTEND_PORT is set)
+FRONTEND_RANGE_LO="${SOKO_FRONTEND_PORT_RANGE_LO:-2000}"
+FRONTEND_RANGE_HI="${SOKO_FRONTEND_PORT_RANGE_HI:-2050}"
+
+usage() {
+  cat <<'EOF'
+Usage: ./soko <command>
+
+  install   Create backend venv, install Python + npm dependencies
+  start     Run API and Vite dev server in the background
+  stop      Stop processes started by ./soko start
+  restart   stop then start
+  status    Show whether dev servers appear to be listening
+
+Environment (optional):
+  SOKO_BACKEND_PORT           Pin API to this port (no scan)
+  SOKO_BACKEND_PORT_RANGE_LO    First API port to try when unpinned (default 2500)
+  SOKO_BACKEND_PORT_RANGE_HI    Last API port to try when unpinned (default 2550)
+  SOKO_FRONTEND_PORT          Pin Vite to this port (no scan)
+  SOKO_FRONTEND_PORT_RANGE_LO First UI port to try when unpinned (default 2000)
+  SOKO_FRONTEND_PORT_RANGE_HI Last UI port to try when unpinned (default 2050)
+  SOKO_NPM_REGISTRY           npm registry URL for install (default https://registry.npmjs.org/)
+EOF
+}
+
+die() { echo "soko: $*" >&2; exit 1; }
+
+ensure_state_dir() {
+  mkdir -p "$STATE"
+}
+
+pick_python() {
+  local c
+  for c in python3.12 python3.11 python3.10 python3; do
+    if command -v "$c" >/dev/null 2>&1; then
+      if "$c" -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' 2>/dev/null; then
+        echo "$c"
+        return 0
+      fi
+    fi
+  done
+  return 1
+}
+
+cmd_install() {
+  ensure_state_dir
+  local py
+  py="$(pick_python)" || die "Need Python 3.10 or newer (e.g. brew install python@3.12). Found: $(command -v python3 2>/dev/null || echo none)"
+
+  echo "soko: using $py"
+  if [[ ! -d "$BACKEND/.venv" ]]; then
+    echo "soko: creating backend virtualenv"
+    "$py" -m venv "$BACKEND/.venv"
+  fi
+  # shellcheck source=/dev/null
+  source "$BACKEND/.venv/bin/activate"
+  echo "soko: pip install (backend)"
+  pip install --upgrade pip >/dev/null
+  pip install -r "$BACKEND/requirements.txt"
+
+  if [[ ! -f "$FRONTEND/package.json" ]]; then
+    die "missing $FRONTEND/package.json"
+  fi
+  echo "soko: npm install (frontend, registry: $NPM_REGISTRY)"
+  (cd "$FRONTEND" && npm install --registry "$NPM_REGISTRY")
+
+  echo "soko: install finished."
+}
+
+port_listening() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
+# Echo first free TCP port in [lo, hi], or fail. Requires lsof when scanning.
+pick_frontend_port() {
+  if ! command -v lsof >/dev/null 2>&1; then
+    die "lsof is required to choose a free frontend port ($FRONTEND_RANGE_LO-$FRONTEND_RANGE_HI)"
+  fi
+  if [[ -n "${SOKO_FRONTEND_PORT:-}" ]]; then
+    if port_listening "$SOKO_FRONTEND_PORT"; then
+      die "SOKO_FRONTEND_PORT=$SOKO_FRONTEND_PORT is already in use"
+    fi
+    echo "$SOKO_FRONTEND_PORT"
+    return 0
+  fi
+  local p="$FRONTEND_RANGE_LO"
+  while [[ "$p" -le "$FRONTEND_RANGE_HI" ]]; do
+    if ! port_listening "$p"; then
+      echo "$p"
+      return 0
+    fi
+    p=$((p + 1))
+  done
+  die "no free port in $FRONTEND_RANGE_LO-$FRONTEND_RANGE_HI; set SOKO_FRONTEND_PORT or free a port"
+}
+
+# Echo first free TCP port in [BACKEND_RANGE_LO, BACKEND_RANGE_HI], or fail.
+pick_backend_port() {
+  if ! command -v lsof >/dev/null 2>&1; then
+    die "lsof is required to choose a free API port ($BACKEND_RANGE_LO-$BACKEND_RANGE_HI)"
+  fi
+  if [[ -n "${SOKO_BACKEND_PORT:-}" ]]; then
+    if port_listening "$SOKO_BACKEND_PORT"; then
+      die "SOKO_BACKEND_PORT=$SOKO_BACKEND_PORT is already in use"
+    fi
+    echo "$SOKO_BACKEND_PORT"
+    return 0
+  fi
+  local p="$BACKEND_RANGE_LO"
+  while [[ "$p" -le "$BACKEND_RANGE_HI" ]]; do
+    if ! port_listening "$p"; then
+      echo "$p"
+      return 0
+    fi
+    p=$((p + 1))
+  done
+  die "no free port in $BACKEND_RANGE_LO-$BACKEND_RANGE_HI; set SOKO_BACKEND_PORT or free a port"
+}
+
+read_pid() {
+  local f="$1"
+  [[ -f "$f" ]] || return 1
+  local p
+  p="$(tr -d ' \n' <"$f" || true)"
+  [[ -n "$p" ]] && [[ "$p" =~ ^[0-9]+$ ]]
+}
+
+kill_tree() {
+  local pid="$1"
+  [[ -z "$pid" ]] && return 0
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -TERM -P "$pid" 2>/dev/null || true
+  fi
+  kill -TERM "$pid" 2>/dev/null || true
+}
+
+cmd_stop() {
+  ensure_state_dir
+  local stopped=0
+  local saved_fp=""
+  local saved_bp=""
+  if [[ -f "$FRONTEND_PORT_FILE" ]]; then
+    saved_fp="$(tr -d ' \n' <"$FRONTEND_PORT_FILE" || true)"
+  fi
+  if [[ -f "$BACKEND_PORT_FILE" ]]; then
+    saved_bp="$(tr -d ' \n' <"$BACKEND_PORT_FILE" || true)"
+  fi
+  if read_pid "$BACKEND_PID"; then
+    local p
+    p="$(tr -d ' \n' <"$BACKEND_PID")"
+    echo "soko: stopping backend (pid $p)"
+    kill_tree "$p"
+    stopped=1
+  fi
+  rm -f "$BACKEND_PID"
+
+  if read_pid "$FRONTEND_PID"; then
+    local p
+    p="$(tr -d ' \n' <"$FRONTEND_PID")"
+    echo "soko: stopping frontend (pid $p)"
+    kill_tree "$p"
+    stopped=1
+  fi
+  rm -f "$FRONTEND_PID"
+  rm -f "$FRONTEND_PORT_FILE"
+  rm -f "$BACKEND_PORT_FILE"
+  rm -f "$FRONTEND_ENV_FILE"
+
+  # npm/vite may leave children; clear listeners on our ports
+  sleep 1
+  if command -v lsof >/dev/null 2>&1; then
+    local pids
+    if [[ -n "${saved_bp:-}" ]] && [[ "$saved_bp" =~ ^[0-9]+$ ]]; then
+      pids="$(lsof -tiTCP:"$saved_bp" -sTCP:LISTEN 2>/dev/null || true)"
+      if [[ -n "${pids:-}" ]]; then
+        echo "soko: freeing API port $saved_bp"
+        kill -TERM $pids 2>/dev/null || true
+      fi
+    fi
+    if [[ -n "${saved_fp:-}" ]] && [[ "$saved_fp" =~ ^[0-9]+$ ]]; then
+      pids="$(lsof -tiTCP:"$saved_fp" -sTCP:LISTEN 2>/dev/null || true)"
+      if [[ -n "${pids:-}" ]]; then
+        echo "soko: freeing frontend port $saved_fp"
+        kill -TERM $pids 2>/dev/null || true
+      fi
+    fi
+  fi
+
+  if [[ "$stopped" -eq 0 ]]; then
+    echo "soko: nothing to stop (no pid files)."
+  else
+    echo "soko: stopped."
+  fi
+}
+
+wait_for_http() {
+  local url="$1" name="$2" max="${3:-40}"
+  local i=0
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "soko: warning: curl not found; skipping $name readiness check" >&2
+    return 0
+  fi
+  while [[ "$i" -lt "$max" ]]; do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      echo "soko: $name is up."
+      return 0
+    fi
+    sleep 0.25
+    i=$((i + 1))
+  done
+  echo "soko: warning: $name did not respond in time (see logs under $STATE)" >&2
+}
+
+cmd_start() {
+  ensure_state_dir
+  if [[ ! -x "$BACKEND/.venv/bin/python" ]]; then
+    die "run ./soko install first (backend .venv missing)"
+  fi
+  if [[ ! -d "$FRONTEND/node_modules" ]]; then
+    die "run ./soko install first (frontend node_modules missing)"
+  fi
+
+  local BACKEND_PORT
+  BACKEND_PORT="$(pick_backend_port)"
+  echo "$BACKEND_PORT" >"$BACKEND_PORT_FILE"
+
+  printf 'VITE_API_URL=http://127.0.0.1:%s\n' "$BACKEND_PORT" >"$FRONTEND_ENV_FILE"
+
+  local FRONTEND_PORT
+  FRONTEND_PORT="$(pick_frontend_port)"
+  echo "$FRONTEND_PORT" >"$FRONTEND_PORT_FILE"
+  if [[ "$FRONTEND_PORT" != "$FRONTEND_RANGE_LO" ]]; then
+    echo "soko: note: port $FRONTEND_RANGE_LO was busy — UI is on $FRONTEND_PORT instead (see $FRONTEND_PORT_FILE)." >&2
+  fi
+
+  : >"$BACKEND_LOG"
+  : >"$FRONTEND_LOG"
+
+  echo "soko: starting backend on http://127.0.0.1:$BACKEND_PORT"
+  (
+    cd "$BACKEND"
+    # shellcheck source=/dev/null
+    source .venv/bin/activate
+    exec uvicorn app.main:app --host 127.0.0.1 --port "$BACKEND_PORT"
+  ) >>"$BACKEND_LOG" 2>&1 &
+  echo $! >"$BACKEND_PID"
+
+  echo "soko: starting frontend on http://127.0.0.1:$FRONTEND_PORT (saved in $FRONTEND_PORT_FILE)"
+  (
+    cd "$FRONTEND"
+    # Do not pass --host here; vite.config.js controls host (must match for localhost vs 127.0.0.1).
+    exec npm run dev -- --port "$FRONTEND_PORT"
+  ) >>"$FRONTEND_LOG" 2>&1 &
+  echo $! >"$FRONTEND_PID"
+
+  wait_for_http "http://127.0.0.1:$BACKEND_PORT/health" "API" 60 || true
+
+  if command -v curl >/dev/null 2>&1; then
+    local n=0
+    while [[ "$n" -lt 80 ]]; do
+      if curl -fsS "http://127.0.0.1:$FRONTEND_PORT" >/dev/null 2>&1; then
+        echo "soko: frontend is up."
+        break
+      fi
+      sleep 0.25
+      n=$((n + 1))
+    done
+    [[ "$n" -ge 80 ]] && echo "soko: warning: frontend did not respond in time — see $FRONTEND_LOG" >&2
+  fi
+
+  echo ""
+  echo "  API:       http://127.0.0.1:$BACKEND_PORT"
+  echo "  Frontend:  http://127.0.0.1:$FRONTEND_PORT"
+  echo "  Logs:      $BACKEND_LOG"
+  echo "            $FRONTEND_LOG"
+  echo "  Stop:      ./soko stop"
+}
+
+cmd_status() {
+  local bp=""
+  if [[ -n "${SOKO_BACKEND_PORT:-}" ]]; then
+    bp="$SOKO_BACKEND_PORT"
+  elif [[ -f "$BACKEND_PORT_FILE" ]]; then
+    bp="$(tr -d ' \n' <"$BACKEND_PORT_FILE" 2>/dev/null || true)"
+  fi
+  if [[ -n "$bp" ]]; then
+    echo "Backend port $bp:  $(port_listening "$bp" && echo listening || echo idle)"
+  else
+    echo "Backend: (not recorded; ./soko start uses $BACKEND_RANGE_LO-$BACKEND_RANGE_HI)"
+  fi
+  local fp=""
+  if [[ -n "${SOKO_FRONTEND_PORT:-}" ]]; then
+    fp="$SOKO_FRONTEND_PORT"
+  elif [[ -f "$FRONTEND_PORT_FILE" ]]; then
+    fp="$(tr -d ' \n' <"$FRONTEND_PORT_FILE" 2>/dev/null || true)"
+  fi
+  if [[ -n "$fp" ]]; then
+    echo "Frontend port $fp: $(port_listening "$fp" && echo listening || echo idle)"
+  else
+    echo "Frontend: (not recorded; ./soko start uses $FRONTEND_RANGE_LO-$FRONTEND_RANGE_HI)"
+  fi
+  if [[ -f "$BACKEND_PID" ]]; then echo "  backend.pid: $(cat "$BACKEND_PID" 2>/dev/null || echo '?')"; fi
+  if [[ -f "$FRONTEND_PID" ]]; then echo "  frontend.pid: $(cat "$FRONTEND_PID" 2>/dev/null || echo '?')"; fi
+}
+
+main() {
+  local cmd="${1:-}"
+  case "$cmd" in
+    install) cmd_install ;;
+    start) cmd_start ;;
+    stop) cmd_stop ;;
+    restart)
+      cmd_stop
+      sleep 0.5
+      cmd_start
+      ;;
+    status) cmd_status ;;
+    -h|--help|help) usage ;;
+    "")
+      usage
+      exit 1
+      ;;
+    *)
+      die "unknown command: $cmd (try ./soko help)"
+      ;;
+  esac
+}
+
+main "$@"

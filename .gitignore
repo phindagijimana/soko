@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.db
+.env
+backend/uploads/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env.development.local
+
+# Local CLI state (./soko start)
+.soko/
+
+# Python virtualenv (created by ./soko install)
+backend/.venv/
+
+# OS
+.DS_Store
+
+# Local SMS test logs
+sms_log.txt
+test_sms_log.txt
+backend/sms_log.txt
+backend/test_sms_log.txt

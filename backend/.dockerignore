@@ -1,0 +1,12 @@
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+*.db
+test_*.db
+*_sms_log.txt
+sms_log.txt
+uploads
+backups
+.env
+.git

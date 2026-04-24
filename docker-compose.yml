@@ -1,0 +1,105 @@
+# Agri Marketplace — Postgres + API + Nginx (+ optional MinIO for S3)
+# Usage:
+#   docker compose up --build
+#   API: http://localhost:8080  (via Nginx) or http://localhost:8000 (direct)
+#
+# With S3/MinIO profile:
+#   docker compose --profile s3 up --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: agri
+      POSTGRES_PASSWORD: agri
+      POSTGRES_DB: agri
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agri -d agri"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    profiles: ["s3"]
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadminsecret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    profiles: ["s3"]
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: /bin/sh
+    command: -c "sleep 5 && mc alias set local http://minio:9000 minioadmin minioadminsecret && mc mb local/agri-media --ignore-existing || true"
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://agri:agri@postgres:5432/agri
+      CREATE_TABLES_ON_STARTUP: "false"
+      ENVIRONMENT: development
+      TRUSTED_HOSTS: "*"
+      STORAGE_BACKEND: local
+      UPLOAD_DIR: /app/uploads
+      ENABLE_SEED_DATA: "true"
+    volumes:
+      - api_uploads:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-s3:
+    profiles: ["s3"]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://agri:agri@postgres:5432/agri
+      CREATE_TABLES_ON_STARTUP: "false"
+      ENVIRONMENT: development
+      TRUSTED_HOSTS: "*"
+      STORAGE_BACKEND: s3
+      S3_BUCKET_NAME: agri-media
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadminsecret
+      AWS_ENDPOINT_URL: http://minio:9000
+      AWS_REGION: us-east-1
+      MEDIA_PUBLIC_BASE_URL: http://localhost:9000/agri-media
+      ENABLE_SEED_DATA: "true"
+    ports:
+      - "8001:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  api_uploads:
+  minio_data:
