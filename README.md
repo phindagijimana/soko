@@ -1,6 +1,6 @@
 # Agri Marketplace
 
-> **Live app (GitHub Pages):** open **`https://phindagijimana.github.io/soko/`** in your browser.  
+> **Live app (GitHub Pages):** [https://phindagijimana.github.io/soko/](https://phindagijimana.github.io/soko/)  
 > **Not the live app:** the repository page **`https://github.com/phindagijimana/soko`** is the *source code* and will always show this README when you are on that URL — that is not the hosted website.
 
 Pilot-ready agricultural marketplace for Rwanda and East Africa. Guests can browse listings, while farmers and buyers must create phone-based profiles before posting harvest, placing orders, leaving reviews, or requesting verification.
@@ -74,6 +74,8 @@ npm run dev
 ```
 
 ## GitHub Pages (frontend)
+
+**Live site:** [https://phindagijimana.github.io/soko/](https://phindagijimana.github.io/soko/)
 
 The [Deploy GitHub Pages](.github/workflows/deploy-github-pages.yml) workflow runs on every push to `main`. The site is a **static build only**; the API must be hosted separately (e.g. cloud, VPS, or FastAPI on a public URL).
 
