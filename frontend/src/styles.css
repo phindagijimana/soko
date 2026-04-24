@@ -48,7 +48,26 @@ textarea { min-height: 110px; resize: vertical; }
   border-color: #1e3a8a;
 }
 .hero h1 { margin: 0.35rem 0 0.5rem; font-size: 2.3rem; }
+.hero .hero-tagline { margin: 0 0 0.4rem; font-size: 1.35rem; font-weight: 600; color: #e0e7ff; }
 .hero p { margin: 0; max-width: 780px; color: #dbeafe; }
+.hero.hero-admin { background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%); }
+.hero a.back-to-site { color: #e0e7ff; text-decoration: underline; font-size: 0.95rem; }
+.hero a.back-to-site:hover { color: #fff; }
+.nav-aux {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.5rem;
+  padding: 0.75rem 1rem;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+}
+.button-link { font-weight: 600; color: #1e3a8a; }
+.button-link:hover { text-decoration: underline; }
+.nav-aux-hint { margin: 0; font-size: 0.82rem; color: #64748b; }
+.admin-page-grid { display: flex; flex-direction: column; gap: 1rem; }
 .eyebrow { display: inline-block; color: #bfdbfe; text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.78rem; }
 .user-pill {
   display: flex; flex-direction: column; gap: 0.15rem; align-items: flex-end; color: white;

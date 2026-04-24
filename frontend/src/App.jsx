@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Routes, Route, Navigate, Link, useLocation } from 'react-router-dom'
 import { api, API_BASE } from './lib/api'
 import { emptyListing, emptyOrder, emptyRegister, emptyReview, emptySupport } from './lib/constants'
 
@@ -411,15 +412,24 @@ export default function App() {
   }
 
   const tabs = ['market', 'auth', 'post', 'orders', 'reviews', 'support', 'pilot']
-  if (currentUser?.is_admin) tabs.push('admin')
+  const location = useLocation()
 
-  return (
+  useEffect(() => {
+    if (location.pathname === '/admin') {
+      document.title = 'Soko Admin'
+    } else {
+      document.title = 'Soko — Agri Marketplace'
+    }
+  }, [location.pathname])
+
+  const sitePage = (
     <div className="page-shell">
-      <div className="page">
+    <div className="page">
         <header className="hero">
           <div>
-            <span className="eyebrow">Rwanda + East Africa</span>
-            <h1>Agri Marketplace</h1>
+            <span className="eyebrow">Soko · Rwanda + East Africa</span>
+            <h1>Soko</h1>
+            <p className="hero-tagline">Agri Marketplace</p>
             <p>
               Anyone can browse harvest listings. Farmers and buying businesses must create a profile and sign in to
               post harvest, place orders, request verification, and leave reviews.
@@ -451,6 +461,12 @@ export default function App() {
             <button key={item} className={view === item ? 'active' : 'secondary'} onClick={() => setView(item)}>{item}</button>
           ))}
         </nav>
+        {currentUser?.is_admin && (
+          <div className="nav-aux">
+            <Link to="/admin" className="button-link">Soko Admin</Link>
+            <p className="nav-aux-hint">Platform metrics, verification queue, audit log, and ticket moderation</p>
+          </div>
+        )}
 
         {message && <div className="message success">{message}</div>}
         {error && <div className="message error">{error}</div>}
@@ -710,14 +726,9 @@ export default function App() {
                     <div>{ticket.subject}</div>
                     <p>{ticket.message}</p>
                     {currentUser?.is_admin && (
-                      <>
-                        <textarea placeholder="Admin notes" value={supportNotes[ticket.id] || ''} onChange={(e) => setSupportNotes({ ...supportNotes, [ticket.id]: e.target.value })} />
-                        <div className="row wrap">
-                          {['in_progress', 'resolved', 'closed'].map((status) => (
-                            <button key={status} type="button" className="secondary" onClick={() => updateSupportTicket(ticket.id, status)}>{status}</button>
-                          ))}
-                        </div>
-                      </>
+                      <p className="small">
+                        <Link to="/admin">Soko Admin</Link> — update status and notes for all tickets
+                      </p>
                     )}
                   </div>
                 ))}
@@ -751,26 +762,82 @@ export default function App() {
           </section>
         )}
 
-        {view === 'admin' && currentUser?.is_admin && (
-          <section className="admin-grid">
+      </div>
+    </div>
+  )
+
+  const adminPage = (
+    <div className="page-shell">
+      <div className="page">
+        <header className="hero hero-admin">
+          <div>
+            <span className="eyebrow">Soko</span>
+            <h1>Soko Admin</h1>
+            <p>Platform tools for operations — not shown to public marketplace visitors.</p>
+          </div>
+          <div className="auth-state">
+            {currentUser && (
+              <div className="user-pill">
+                <strong>{currentUser.name}</strong>
+                <span>admin</span>
+              </div>
+            )}
+            <Link to="/" className="back-to-site">← Back to website</Link>
+            <button type="button" className="secondary" onClick={signOut}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        {message && <div className="message success">{message}</div>}
+        {error && <div className="message error">{error}</div>}
+        {loading && <div className="message info">Processing request…</div>}
+
+        <section className="admin-page-grid">
+          <div className="admin-grid">
             <div className="panel">
               <SectionTitle title="Platform summary" text="Quick production-style admin metrics." />
-              {metrics && <div className="stack"><div className="review-card"><div>Users: {metrics.users}</div><div>Listings: {metrics.listings}</div><div>Orders: {metrics.orders}</div><div>Reviews: {metrics.reviews}</div><div>Verification requests: {metrics.verification_requests}</div><div>Support tickets: {metrics.support_tickets}</div></div></div>}
+              {metrics && (
+                <div className="stack">
+                  <div className="review-card">
+                    <div>Users: {metrics.users}</div>
+                    <div>Listings: {metrics.listings}</div>
+                    <div>Orders: {metrics.orders}</div>
+                    <div>Reviews: {metrics.reviews}</div>
+                    <div>Verification requests: {metrics.verification_requests}</div>
+                    <div>Support tickets: {metrics.support_tickets}</div>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="panel">
               <SectionTitle title="Verification requests" text="Admin review queue for farmer and buyer verification." />
               <div className="stack">
                 {verificationRequests.map((item) => (
                   <div className="review-card" key={item.id}>
-                    <div><strong>Request #{item.id}</strong></div>
+                    <div>
+                      <strong>Request #{item.id}</strong>
+                    </div>
                     <div>User #{item.user_id}</div>
                     <div>{item.document_type}</div>
                     <div>{item.document_reference}</div>
                     <div>Status: {item.status}</div>
-                    <textarea placeholder="Review notes" value={verificationNotes[item.id] || ''} onChange={(e) => setVerificationNotes({ ...verificationNotes, [item.id]: e.target.value })} />
+                    <textarea
+                      placeholder="Review notes"
+                      value={verificationNotes[item.id] || ''}
+                      onChange={(e) => setVerificationNotes({ ...verificationNotes, [item.id]: e.target.value })}
+                    />
                     <div className="row wrap">
-                      <button type="button" onClick={() => reviewVerificationRequest(item.id, 'approved')}>Approve</button>
-                      <button type="button" className="secondary" onClick={() => reviewVerificationRequest(item.id, 'rejected')}>Reject</button>
+                      <button type="button" onClick={() => reviewVerificationRequest(item.id, 'approved')}>
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => reviewVerificationRequest(item.id, 'rejected')}
+                      >
+                        Reject
+                      </button>
                     </div>
                   </div>
                 ))}
@@ -783,17 +850,66 @@ export default function App() {
               <div className="stack log-stack">
                 {auditLogs.map((log) => (
                   <div className="review-card" key={log.id}>
-                    <div><strong>{log.action}</strong></div>
-                    <div>{log.entity_type} #{log.entity_id}</div>
+                    <div>
+                      <strong>{log.action}</strong>
+                    </div>
+                    <div>
+                      {log.entity_type} #{log.entity_id}
+                    </div>
                     <div>{log.details}</div>
                     <div className="small">{new Date(log.created_at).toLocaleString()}</div>
                   </div>
                 ))}
               </div>
             </div>
-          </section>
-        )}
+          </div>
+
+          <div className="panel">
+            <SectionTitle title="Support tickets (all)" text="Update status and internal notes for every ticket in the system." />
+            <div className="stack">
+              {supportTickets.map((ticket) => (
+                <div className="review-card" key={ticket.id}>
+                  <div>
+                    <strong>Ticket #{ticket.id}</strong>
+                  </div>
+                  <div>Category: {ticket.category}</div>
+                  <div>Status: {ticket.status}</div>
+                  <div>{ticket.subject}</div>
+                  <p>{ticket.message}</p>
+                  <textarea
+                    placeholder="Admin notes"
+                    value={supportNotes[ticket.id] || ''}
+                    onChange={(e) => setSupportNotes({ ...supportNotes, [ticket.id]: e.target.value })}
+                  />
+                  <div className="row wrap">
+                    {['in_progress', 'resolved', 'closed'].map((status) => (
+                      <button
+                        key={status}
+                        type="button"
+                        className="secondary"
+                        onClick={() => updateSupportTicket(ticket.id, status)}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!supportTickets.length && <p className="small">No support tickets yet.</p>}
+            </div>
+          </div>
+        </section>
       </div>
     </div>
+  )
+
+  return (
+    <Routes>
+      <Route path="/" element={sitePage} />
+      <Route
+        path="/admin"
+        element={currentUser?.is_admin ? adminPage : <Navigate to="/" replace />}
+      />
+    </Routes>
   )
 }
