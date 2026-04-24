@@ -19,9 +19,10 @@ permissions:
   pages: write
   id-token: write
 
+# Do not cancel an in-progress deploy; avoids half-published sites.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -44,22 +45,33 @@ jobs:
           npm run build
         env:
           GITHUB_REPOSITORY: ${{ github.repository }}
-          CI: true
+          CI: "true"
           VITE_API_URL: ${{ vars.VITE_API_URL }}
           VITE_BASE: ${{ vars.VITE_BASE }}
+
+      - name: Verify build output
+        run: test -f frontend/dist/index.html && ls -la frontend/dist
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: frontend/dist
+          # Include .nojekyll and other dotfiles in public/
+          include-hidden-files: true
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
+        id: deployment
+        uses: actions/deploy-pages@v5

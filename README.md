@@ -1,5 +1,8 @@
 # Agri Marketplace
 
+> **Live app (GitHub Pages):** open **`https://phindagijimana.github.io/soko/`** in your browser.  
+> **Not the live app:** the repository page **`https://github.com/phindagijimana/soko`** is the *source code* and will always show this README when you are on that URL — that is not the hosted website.
+
 Pilot-ready agricultural marketplace for Rwanda and East Africa. Guests can browse listings, while farmers and buyers must create phone-based profiles before posting harvest, placing orders, leaving reviews, or requesting verification.
 
 ## What is implemented
@@ -74,7 +77,9 @@ npm run dev
 
 The [Deploy GitHub Pages](.github/workflows/deploy-github-pages.yml) workflow runs on every push to `main`. The site is a **static build only**; the API must be hosted separately (e.g. cloud, VPS, or FastAPI on a public URL).
 
-**If `https://<user>.github.io/<repo>/` shows the README (or a docs site) instead of the Agri Marketplace UI:** GitHub is still publishing from the **branch** (repo root), not from the **Actions** build. The repo root has no `index.html`, so Pages falls back to rendering `README.md`. Fix: **Settings** → **Pages** → **Build and deployment** → set **Source** to **GitHub Actions** (not “Deploy from a branch”). Save, then open the **Actions** tab, run **Deploy GitHub Pages**, and wait for it to finish. Your published site must come from the workflow artifact (`frontend/dist`), which includes the Vite `index.html`.
+**If you see this full README as a “web page”:** you are almost certainly on **`https://github.com/<user>/<repo>`** (the **code** page), which always renders `README.md`. The **deployed app** is only at **`https://<user>.github.io/<repo>/`** — type that `github.io` URL in the address bar (or use the link in the note at the top of this file).
+
+**If `https://<user>.github.io/<repo>/` still shows README text instead of the Agri Marketplace UI:** GitHub Pages is still publishing from a **branch** (repo root), not from **Actions**. The repo root has no `index.html` at the site root, so Pages can fall back to README. Fix: **Settings** → **Pages** → set **Source** to **GitHub Actions**, then run the **Deploy GitHub Pages** workflow to completion.
 
 1. **Repository** → **Settings** → **Pages** → set **Build and deployment** source to **GitHub Actions** (use the provided workflow, not a branch as the source for this setup).
 2. **Settings** → **Secrets and variables** → **Actions** → **Variables**: add `VITE_API_URL` to your public API base URL (no trailing slash), e.g. `https://api.yourdomain.com`. This value is embedded at build time. Optional: `VITE_BASE` if the app is not served at `https://<user>.github.io/<repo>/` (for example, a custom domain with a different path).
